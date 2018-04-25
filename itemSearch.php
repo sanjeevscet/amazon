@@ -36,20 +36,20 @@ class AmazonAPI {
         $url_params .= "&AssociateTag=" . $this->amazon_aff_id;
 
         if(!empty($this->itemID)) {
-					  $url_params .= "&Keywords=" .  str_replace(" ", "%20","Potter");
+					  $url_params .= "&Keywords=" .  str_replace(" ", "%20","the hunger games");
 						//p($url_params,1);
             //$url_params .= "&Keywords=" . "the%20hunger%20games";
 						//p($url_params);
         }
 
         if(!empty($this->keywords)) {
-            $url_params .= "&keywords=" . str_replace(",", "%2C", $this->keywords);
+            $url_params .= "&Keywords=" . str_replace(",", "%2C", $this->keywords);
         }
 
         $url_params .= "&Operation=" . $this->operation ."&SearchIndex=Books";
         //$url_params .= "&ResponseGroup=" . $this->response_groups;
-        $url_params .= "&Sort=titlerank&Service=AWSECommerceService";
-        $url_params .= "&ItemPage=4";
+        $url_params .= "&Service=AWSECommerceService";
+       // $url_params .= "&ItemPage=4";
         $url_params .= "&Timestamp=" . rawurlencode(gmdate("Y-m-d\TH:i:s\Z"));
         $url_params .= "&Version=2013-08-01";
 
@@ -57,7 +57,7 @@ class AmazonAPI {
 
         $url .= $url_params;
         $url .= "&Signature=" . $this->generate_signature();
-p($url);
+//p($url);
         return $url;
     }
 
@@ -141,10 +141,16 @@ p($url);
     public function get_item_data()
     {
         if($this->check_for_errors()) return null;
-p($this->xml);
-        $product = $this->xml->Items->Item;
-				$json = json_encode($this->xml);
-				p(json_decode($json));
+        $product = $this->xml->Items;
+				$json = json_encode($product);
+				$arr = json_decode($json);
+				$items = $arr->Item;
+				
+				$asin = array();
+				foreach($items as $item) {
+					$asin[] = $item->ASIN;
+				}
+				p($asin);
         $item = new STDclass;
         $item->detailedPageURL = $product->DetailPageURL;
         $item->link = "https://www.amazon.com/gp/product/".$this->itemID."/?tag=" . $this->amazon_aff_id;

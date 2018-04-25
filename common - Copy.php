@@ -9,6 +9,7 @@ class AmazonAPI {
     var $url_params;
     var $itemID;
     var $xml;
+		var $srch_Keywords;
 
     var $operation;
     var $signature;
@@ -16,7 +17,6 @@ class AmazonAPI {
 
     var $error_message;
     var $error=0;
-		var $Keywords;
     
 
     public function __construct($affid, $access, $secret)
@@ -26,6 +26,40 @@ class AmazonAPI {
         $this->amazon_secret_key = $secret;
     }
 
+		public function build_search_url() {
+        $url = "http://webservices.amazon.com/onca/xml?";
+
+        //$this->response_groups = str_replace(",", "%2C", $this->response_groups);
+
+        $url_params = "AWSAccessKeyId=" . $this->amazon_access_key;
+        $url_params .= "&AssociateTag=" . $this->amazon_aff_id;
+
+        if(!empty($this->itemID)) {
+					  $url_params .= "&Keywords=" .  str_replace(" ", "%20","the hunger games");
+						//p($url_params,1);
+            //$url_params .= "&Keywords=" . "the%20hunger%20games";
+						//p($url_params);
+        }
+//p($this->srch_Keywords, "sds");
+        if(!empty($this->srch_Keywords)) {
+            $url_params .= "&Keywords=" . $this->srch_Keywords;
+        }
+
+        $url_params .= "&Operation=" . $this->operation ."&SearchIndex=All";
+        //$url_params .= "&ResponseGroup=" . $this->response_groups;
+        $url_params .= "&Service=AWSECommerceService";
+       // $url_params .= "&ItemPage=4";
+        $url_params .= "&Timestamp=" . rawurlencode(gmdate("Y-m-d\TH:i:s\Z"));
+        $url_params .= "&Version=2013-08-01";
+
+        $this->url_params = $url_params;
+
+        $url .= $url_params;
+        $url .= "&Signature=" . $this->generate_signature();
+//p($url);
+        return $url;
+		
+		}
     public function build_url()
     {
         $url = "http://webservices.amazon.com/onca/xml?";
@@ -79,13 +113,33 @@ class AmazonAPI {
         curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
 
         $output = curl_exec($ch);
-//p("sss",$output);
         curl_close($ch);
 
         $this->xml = simplexml_load_string($output);
         return $this;
     }
 
+    public function item_search($srch_Keywords)
+    {
+			//p($Keywords);
+        $this->operation = "ItemSearch";
+        $this->srch_Keywords = str_replace(" ", "%2C", $srch_Keywords);
+				//p($this->Keywords);
+
+        $url = $this->build_search_url();
+
+        $ch = curl_init();  
+
+        curl_setopt($ch,CURLOPT_URL,$url);
+        curl_setopt($ch,CURLOPT_RETURNTRANSFER,true);
+
+        $output = curl_exec($ch);
+				//p($output);
+        curl_close($ch);
+
+        $this->xml = simplexml_load_string($output);
+        return $this;
+    }
 
     public function check_for_errors()
     {
@@ -115,7 +169,27 @@ class AmazonAPI {
         return $price;
     }
 
-    public function get_item_data()
+    public function get_items_data()
+    {
+        if($this->check_for_errors()) return null;
+        $product = $this->xml->Items;
+				p($product);
+				$json = json_encode($product);
+				$arr = json_decode($json);
+				$items = $arr->Item;
+				
+				$asins = array();
+				$searchItems = array();
+				foreach($items as $item) {
+					$asins[] = $item->ASIN;
+					$searchItems[] = $this->item_lookup($item->ASIN)->get_item_data("array");
+				}
+				 p(htmlspecialchars(json_encode($searchItems), ENT_QUOTES, 'UTF-8'));
+
+				p($asins, $searchItems, json_encode($searchItems));
+		}
+
+    public function get_item_data($ret="json")
     {
         if($this->check_for_errors()) return null;
 
@@ -141,15 +215,19 @@ class AmazonAPI {
 					$jsonData['CurrencyCode'] = $arr['ItemAttributes']['ListPrice']['CurrencyCode'];
 				}
 				//EditorialReviews
-				$jsonData['SmallImage'] = $arr['SmallImage']['URL'];
-				$jsonData['MediumImage'] = $arr['MediumImage']['URL'];
-				$jsonData['LargeImage'] = $arr['LargeImage']['URL'];
+				if(isset($arr['SmallImage'])) {
+					$jsonData['SmallImage'] = $arr['SmallImage']['URL'];
+					$jsonData['MediumImage'] = $arr['MediumImage']['URL'];
+					$jsonData['LargeImage'] = $arr['LargeImage']['URL'];
+				}
 				$jsonData['ASIN'] = $arr['ASIN'];
 				if(isset($arr['ParentASIN'])) {
 					$jsonData['ParentASIN'] = $arr['ParentASIN'];
 				}
 				$jsonData['DetailPageURL'] = $arr['DetailPageURL'];
-				$jsonData['SalesRank'] = $arr['SalesRank'];
+				if(isset($arr['SalesRank'])) {
+					$jsonData['SalesRank'] = $arr['SalesRank'];
+				}
 				$jsonData['link'] = $item->link;
 				if(isset($arr['OfferSummary']['LowestNewPrice'])) {
 					$jsonData['LowestNewPrice'] = $arr['OfferSummary']['LowestNewPrice']['FormattedPrice'];
@@ -158,17 +236,18 @@ class AmazonAPI {
 				if(isset($arr['ItemAttributes']['ReleaseDate'])) {
 					$jsonData['ReleaseDate'] = $arr['ItemAttributes']['ReleaseDate'];
 				}
-				
-				$EditorialReview = $arr['EditorialReviews']['EditorialReview'];
-				foreach($EditorialReview as $review) {
-					if(is_array($review)) {
-						if(in_array("Product Description", $review)) {
-							$jsonData['ProductDescription'] = stripslashes($review['Content']);
-						}
-						continue;
-					} else {
-						if(in_array("Product Description", $EditorialReview)) {
-							$jsonData['ProductDescription'] = stripslashes($EditorialReview['Content']);
+				if(isset($arr['EditorialReviews']['EditorialReview'])) {
+					$EditorialReview = $arr['EditorialReviews']['EditorialReview'];
+					foreach($EditorialReview as $review) {
+						if(is_array($review)) {
+							if(in_array("Product Description", $review)) {
+								$jsonData['ProductDescription'] = htmlentities($review['Content']);
+							}
+							continue;
+						} else {
+							if(in_array("Product Description", $EditorialReview)) {
+								$jsonData['ProductDescription'] = htmlentities($EditorialReview['Content']);
+							}
 						}
 					}
 				}
@@ -189,30 +268,37 @@ class AmazonAPI {
 				//p($arr['EditorialReviews']['EditorialReview']['Content']);
 				//MediumImage
 //				$jsonData['CurrencyCode'] = $product->ItemAttributes->ListPrice->CurrencyCode;
-				p(json_encode($jsonData),$jsonData, $arr, $arr['OfferSummary']);
+				//p(json_encode($jsonData),$jsonData, $arr, $arr['OfferSummary']);
 
 
-				$jsonData = array();
-				$jsonData['ListPrice'] = $product->ItemAttributes->ListPrice->FormattedPrice;
-				$jsonData['CurrencyCode'] = $product->ItemAttributes->ListPrice->CurrencyCode;
-				p(json_encode($jsonData));
+				//p(json_encode($jsonData));
 			//	p($jsonData, $product->ItemAttributes->ListPrice, $product->OfferSummary->);
         $item->price = $this->get_item_price($product->OfferSummary);
-
+				if($ret == "array") {
+					return $jsonData;
+				}
+				return htmlspecialchars(json_encode($jsonData), ENT_QUOTES, 'UTF-8');
         return $item;
     }
 
 }
-
+/*
 if(empty($_GET['ASIN'])) {
 	die("please send ASIN in url");
 }
+*/
 $amazon = new AmazonAPI("rashvin-20", "AKIAINK6LYGABIVDCLVQ", "3bzKyuQQpnCcoWfw/dBzne1Rng+YJ+Lh4VP/2yBe");
-//$item = $amazon->item_lookup("B06XX29S9Q")->get_item_data();
-$item = $amazon->item_lookup($_GET['ASIN'])->get_item_data();
+//$item = $amazon->item_lookup("B06XX29S9Q")->get_item_data(); //B004GVZUUY
+//$item = $amazon->item_lookup("0439023521")->get_item_data(); p($item);
+//$json_decode = htmlspecialchars(json_encode($item), ENT_QUOTES, 'UTF-8');
+//p($json_decode);
+//p(stripslashes(json_encode($item)));
+$item = $amazon->item_search("the hunger games")->get_items_data();
+
+//$item = $amazon->item_lookup($_GET['ASIN'])->get_item_data();
 //$item = $amazon->item_lookup("B00ZV9RDKK")->get_item_data();
 //$item = $amazon->item_lookup("B004GVZUUY")->get_item_data();
-p($item);
+p("sdsd",$item);
 //var_dump($item);
 
 echo $item->title;
